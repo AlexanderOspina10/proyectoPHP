@@ -1,3 +1,6 @@
+CREATE DATABASE IF NOT EXISTS fashion_store;
+
+USE fashion_store;
 
 -- Tabla de usuarios (incluye rol)
 CREATE TABLE IF NOT EXISTS usuario (
@@ -25,10 +28,30 @@ CREATE TABLE IF NOT EXISTS productos (
 -- Tabla de pedidos
 CREATE TABLE IF NOT EXISTS pedidos (
   id INT AUTO_INCREMENT PRIMARY KEY,
+  usuario_id INT NOT NULL,
   nombre VARCHAR(100) NOT NULL,
   correo VARCHAR(100) NOT NULL,
   celular VARCHAR(15) NOT NULL,
-  fecha DATE NOT NULL,
-  num_prendas VARCHAR(11) NOT NULL,
-  creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  direccion VARCHAR(200) NOT NULL,
+  fecha_pedido DATE NOT NULL,
+  total DECIMAL(10,2) NOT NULL,
+  num_prendas INT NOT NULL,
+  estado ENUM('pendiente','confirmado','enviado','entregado','cancelado') DEFAULT 'pendiente',
+  notas TEXT,
+  creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (usuario_id) REFERENCES usuario(id) ON DELETE CASCADE
+);
+
+
+-- Tabla de detalles del pedido (productos dentro de cada pedido)
+CREATE TABLE IF NOT EXISTS pedido_detalles (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  pedido_id INT NOT NULL,
+  producto_id INT NOT NULL,
+  nombre_producto VARCHAR(100) NOT NULL,
+  precio_unitario DECIMAL(10,2) NOT NULL,
+  cantidad INT NOT NULL,
+  subtotal DECIMAL(10,2) NOT NULL,
+  FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,
+  FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE RESTRICT
 );

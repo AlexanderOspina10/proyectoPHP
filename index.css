@@ -106,7 +106,7 @@
         /* ===== BOTÓN FLOTANTE DEL CARRITO ===== */
         .carrito-toggle {
             position: fixed;
-            bottom: 30px;
+            bottom: 60px;
             right: 30px;
             width: 60px;
             height: 60px;

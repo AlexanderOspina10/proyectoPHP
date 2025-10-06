@@ -20,12 +20,12 @@ try {
     die("Error de conexión: " . $e->getMessage());
 }
 
-// Procesar acciones CRUD
+// Procesar acciones
 $mensaje = '';
 $tipo_mensaje = '';
 
-// CREAR producto
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion']) && $_POST['accion'] === 'crear') {
+// ============= CRUD PRODUCTOS =============
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion']) && $_POST['accion'] === 'crear_producto') {
     $nombre = trim($_POST['nombre']);
     $descripcion = trim($_POST['descripcion']);
     $precio = floatval($_POST['precio']);
@@ -57,8 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion']) && $_POST['
     }
 }
 
-// ACTUALIZAR producto
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion']) && $_POST['accion'] === 'actualizar') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion']) && $_POST['accion'] === 'actualizar_producto') {
     $id = intval($_POST['id']);
     $nombre = trim($_POST['nombre']);
     $descripcion = trim($_POST['descripcion']);
@@ -94,9 +93,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion']) && $_POST['
     }
 }
 
-// ELIMINAR producto
-if (isset($_GET['eliminar'])) {
-    $id = intval($_GET['eliminar']);
+if (isset($_GET['eliminar_producto'])) {
+    $id = intval($_GET['eliminar_producto']);
     
     $stmt = $pdo->prepare("SELECT imagen FROM productos WHERE id = ?");
     $stmt->execute([$id]);
@@ -106,8 +104,8 @@ if (isset($_GET['eliminar'])) {
     $stmt = $pdo->prepare($sql);
     
     if ($stmt->execute([$id])) {
-        if ($producto['imagen'] && file_exists('/menuadmin/assets/img/productos/' . $producto['imagen'])) {
-            unlink('/menuadmin/assets/img/productos/' . $producto['imagen']);
+        if ($producto['imagen'] && file_exists('assets/img/productos/' . $producto['imagen'])) {
+            unlink('assets/img/productos/' . $producto['imagen']);
         }
         $mensaje = "Producto eliminado exitosamente";
         $tipo_mensaje = "success";
@@ -117,18 +115,207 @@ if (isset($_GET['eliminar'])) {
     }
 }
 
-// LEER productos
-$sql = "SELECT * FROM productos ORDER BY id DESC";
-$stmt = $pdo->query($sql);
-$productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+// ============= CRUD USUARIOS =============
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion']) && $_POST['accion'] === 'crear_usuario') {
+    $correo = trim($_POST['correo']);
+    $nombre = trim($_POST['nombre']);
+    $apellido = trim($_POST['apellido']);
+    $telefono = trim($_POST['telefono']);
+    $direccion = trim($_POST['direccion']);
+    $perfil = $_POST['perfil'];
+    $clave = password_hash($_POST['clave'], PASSWORD_DEFAULT);
+    
+    $sql = "INSERT INTO usuario (correo, nombre, apellido, telefono, direccion, perfil, clave) VALUES (?, ?, ?, ?, ?, ?, ?)";
+    $stmt = $pdo->prepare($sql);
+    
+    if ($stmt->execute([$correo, $nombre, $apellido, $telefono, $direccion, $perfil, $clave])) {
+        $mensaje = "Usuario creado exitosamente";
+        $tipo_mensaje = "success";
+    } else {
+        $mensaje = "Error al crear el usuario";
+        $tipo_mensaje = "danger";
+    }
+}
 
-// Obtener producto para editar
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['accion']) && $_POST['accion'] === 'actualizar_usuario') {
+    $id = intval($_POST['id']);
+    $correo = trim($_POST['correo']);
+    $nombre = trim($_POST['nombre']);
+    $apellido = trim($_POST['apellido']);
+    $telefono = trim($_POST['telefono']);
+    $direccion = trim($_POST['direccion']);
+    $perfil = $_POST['perfil'];
+    
+    if (!empty($_POST['clave'])) {
+        $clave = password_hash($_POST['clave'], PASSWORD_DEFAULT);
+        $sql = "UPDATE usuario SET correo = ?, nombre = ?, apellido = ?, telefono = ?, direccion = ?, perfil = ?, clave = ? WHERE id = ?";
+        $stmt = $pdo->prepare($sql);
+        $result = $stmt->execute([$correo, $nombre, $apellido, $telefono, $direccion, $perfil, $clave, $id]);
+    } else {
+        $sql = "UPDATE usuario SET correo = ?, nombre = ?, apellido = ?, telefono = ?, direccion = ?, perfil = ? WHERE id = ?";
+        $stmt = $pdo->prepare($sql);
+        $result = $stmt->execute([$correo, $nombre, $apellido, $telefono, $direccion, $perfil, $id]);
+    }
+    
+    if ($result) {
+        $mensaje = "Usuario actualizado exitosamente";
+        $tipo_mensaje = "success";
+    } else {
+        $mensaje = "Error al actualizar el usuario";
+        $tipo_mensaje = "danger";
+    }
+}
+
+if (isset($_GET['eliminar_usuario'])) {
+    $id = intval($_GET['eliminar_usuario']);
+    
+    if ($id === $_SESSION['usuario_id']) {
+        $mensaje = "No puedes eliminar tu propia cuenta";
+        $tipo_mensaje = "warning";
+    } else {
+        $sql = "DELETE FROM usuario WHERE id = ?";
+        $stmt = $pdo->prepare($sql);
+        
+        if ($stmt->execute([$id])) {
+            $mensaje = "Usuario eliminado exitosamente";
+            $tipo_mensaje = "success";
+        } else {
+            $mensaje = "Error al eliminar el usuario";
+            $tipo_mensaje = "danger";
+        }
+    }
+}
+
+// ============= GESTIÓN PEDIDOS =============
+if (isset($_GET['eliminar_pedido'])) {
+    $pedido_id = $_GET['eliminar_pedido'];
+    
+    try {
+        // Iniciar transacción
+        $pdo->beginTransaction();
+        
+        // 1. Primero restaurar el stock
+        $productos_afectados = restaurarStock($pdo, $pedido_id);
+        
+        // 2. Eliminar los detalles del pedido
+        $stmt_eliminar_detalles = $pdo->prepare("DELETE FROM pedido_detalles WHERE pedido_id = ?");
+        $stmt_eliminar_detalles->execute([$pedido_id]);
+        
+        // 3. Eliminar el pedido
+        $stmt_eliminar_pedido = $pdo->prepare("DELETE FROM pedidos WHERE id = ?");
+        $stmt_eliminar_pedido->execute([$pedido_id]);
+        
+        $pdo->commit();
+        
+        $mensaje_stock = count($productos_afectados) . " producto(s) afectado(s)";
+        $_SESSION['mensaje'] = [
+            'tipo' => 'success',
+            'texto' => 'Pedido eliminado y stock restaurado correctamente. ' . $mensaje_stock
+        ];
+        
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        $_SESSION['mensaje'] = [
+            'tipo' => 'danger',
+            'texto' => 'Error al eliminar el pedido: ' . $e->getMessage()
+        ];
+    }
+    
+    header('Location: admin_dashboard.php?tab=pedidos');
+    exit;
+}
+
+/**
+ * Función para restaurar el stock (debe estar disponible en admin_dashboard.php también)
+ */
+function restaurarStock($pdo, $pedido_id) {
+    // Obtener los detalles del pedido
+    $stmt_detalles = $pdo->prepare("
+        SELECT pd.producto_id, pd.cantidad, p.nombre 
+        FROM pedido_detalles pd 
+        LEFT JOIN productos p ON pd.producto_id = p.id 
+        WHERE pd.pedido_id = ?
+    ");
+    $stmt_detalles->execute([$pedido_id]);
+    $detalles = $stmt_detalles->fetchAll(PDO::FETCH_ASSOC);
+    
+    $productos_afectados = [];
+    
+    foreach ($detalles as $detalle) {
+        if ($detalle['producto_id']) {
+            // Restaurar el stock sumando la cantidad
+            $stmt_update_stock = $pdo->prepare("
+                UPDATE productos 
+                SET stock = stock + ? 
+                WHERE id = ?
+            ");
+            $stmt_update_stock->execute([$detalle['cantidad'], $detalle['producto_id']]);
+            
+            $productos_afectados[] = [
+                'id' => $detalle['producto_id'],
+                'nombre' => $detalle['nombre'],
+                'cantidad' => $detalle['cantidad']
+            ];
+        }
+    }
+    
+    return $productos_afectados;
+}
+
+// Obtener datos
+$productos = $pdo->query("SELECT * FROM productos ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC);
+$usuarios = $pdo->query("SELECT * FROM usuario ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC);
+$pedidos = $pdo->query("SELECT p.*, u.nombre as usuario_nombre, u.apellido as usuario_apellido 
+                        FROM pedidos p 
+                        LEFT JOIN usuario u ON p.usuario_id = u.id 
+                        ORDER BY p.id DESC")->fetchAll(PDO::FETCH_ASSOC);
+
+// Obtener datos para editar
 $producto_editar = null;
-if (isset($_GET['editar'])) {
-    $id = intval($_GET['editar']);
+$usuario_editar = null;
+$pedido_detalle = null;
+
+if (isset($_GET['editar_producto'])) {
+    $id = intval($_GET['editar_producto']);
     $stmt = $pdo->prepare("SELECT * FROM productos WHERE id = ?");
     $stmt->execute([$id]);
     $producto_editar = $stmt->fetch(PDO::FETCH_ASSOC);
+}
+
+if (isset($_GET['editar_usuario'])) {
+    $id = intval($_GET['editar_usuario']);
+    $stmt = $pdo->prepare("SELECT * FROM usuario WHERE id = ?");
+    $stmt->execute([$id]);
+    $usuario_editar = $stmt->fetch(PDO::FETCH_ASSOC);
+}
+
+if (isset($_GET['ver_pedido'])) {
+    $id = intval($_GET['ver_pedido']);
+    $stmt = $pdo->prepare("SELECT p.*, u.nombre as usuario_nombre, u.apellido as usuario_apellido, u.correo as usuario_correo 
+                          FROM pedidos p 
+                          LEFT JOIN usuario u ON p.usuario_id = u.id 
+                          WHERE p.id = ?");
+    $stmt->execute([$id]);
+    $pedido_detalle = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    $stmt = $pdo->prepare("SELECT * FROM pedido_detalles WHERE pedido_id = ?");
+    $stmt->execute([$id]);
+    $pedido_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// Determinar pestaña activa
+$tab_activa = 'productos';
+if (isset($_GET['tab'])) {
+    $tab_activa = $_GET['tab'];
+}
+if (isset($_GET['editar_producto']) || isset($_GET['eliminar_producto'])) {
+    $tab_activa = 'productos';
+}
+if (isset($_GET['editar_usuario']) || isset($_GET['eliminar_usuario'])) {
+    $tab_activa = 'usuarios';
+}
+if (isset($_GET['ver_pedido']) || isset($_GET['eliminar_pedido'])) {
+    $tab_activa = 'pedidos';
 }
 ?>
 
@@ -138,8 +325,9 @@ if (isset($_GET['editar'])) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Panel Admin - Fashion Store</title>
-    <link href="assets/vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
-    <link href="assets/vendor/bootstrap-icons/bootstrap-icons.css" rel="stylesheet">
+    
+    <link href="/FashionStore/assets/vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/FashionStore/assets/vendor/bootstrap-icons/bootstrap-icons.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -169,11 +357,6 @@ if (isset($_GET['editar'])) {
             margin: 0;
         }
         
-        .admin-header .user-info {
-            font-size: 0.95rem;
-            opacity: 0.95;
-        }
-        
         .btn-header {
             background: rgba(255,255,255,0.2);
             border: 1px solid rgba(255,255,255,0.3);
@@ -189,18 +372,38 @@ if (isset($_GET['editar'])) {
             transform: translateY(-2px);
         }
         
+        .nav-tabs {
+            border: none;
+            margin-bottom: 30px;
+        }
+        
+        .nav-tabs .nav-link {
+            border: none;
+            background: white;
+            color: #6c757d;
+            font-weight: 600;
+            padding: 15px 30px;
+            margin-right: 10px;
+            border-radius: 12px 12px 0 0;
+            transition: all 0.3s;
+        }
+        
+        .nav-tabs .nav-link:hover {
+            color: #667eea;
+            background: #f8f9fa;
+        }
+        
+        .nav-tabs .nav-link.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
         .card {
             border: none;
             border-radius: 15px;
             box-shadow: 0 5px 25px rgba(0,0,0,0.08);
             margin-bottom: 30px;
             overflow: hidden;
-            transition: transform 0.3s, box-shadow 0.3s;
-        }
-        
-        .card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 35px rgba(0,0,0,0.12);
         }
         
         .card-header {
@@ -213,6 +416,7 @@ if (isset($_GET['editar'])) {
             margin: 0;
             font-weight: 600;
             font-size: 1.3rem;
+            color: white;
         }
         
         .card-body {
@@ -262,11 +466,6 @@ if (isset($_GET['editar'])) {
             transition: all 0.3s;
         }
         
-        .btn-secondary:hover {
-            background: #5a6268;
-            transform: translateY(-2px);
-        }
-        
         .table {
             border-collapse: separate;
             border-spacing: 0 10px;
@@ -306,11 +505,6 @@ if (isset($_GET['editar'])) {
             object-fit: cover;
             border-radius: 12px;
             box-shadow: 0 3px 10px rgba(0,0,0,0.15);
-            transition: transform 0.3s;
-        }
-        
-        .producto-img:hover {
-            transform: scale(1.1);
         }
         
         .badge {
@@ -333,20 +527,15 @@ if (isset($_GET['editar'])) {
             color: white;
         }
         
-        .btn-warning:hover {
-            transform: scale(1.1);
-            box-shadow: 0 4px 15px rgba(255, 193, 7, 0.4);
-            color: white;
-        }
-        
         .btn-danger {
             background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
             border: none;
         }
         
-        .btn-danger:hover {
-            transform: scale(1.1);
-            box-shadow: 0 4px 15px rgba(220, 53, 69, 0.4);
+        .btn-info {
+            background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
+            border: none;
+            color: white;
         }
         
         .alert {
@@ -354,34 +543,6 @@ if (isset($_GET['editar'])) {
             border-radius: 12px;
             padding: 15px 20px;
             box-shadow: 0 3px 15px rgba(0,0,0,0.1);
-            animation: slideDown 0.5s ease-out;
-        }
-        
-        @keyframes slideDown {
-            from {
-                opacity: 0;
-                transform: translateY(-20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-        
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-        }
-        
-        .empty-state i {
-            font-size: 4rem;
-            color: #dee2e6;
-            margin-bottom: 20px;
-        }
-        
-        .empty-state p {
-            color: #6c757d;
-            font-size: 1.1rem;
         }
         
         .stats-card {
@@ -399,10 +560,15 @@ if (isset($_GET['editar'])) {
             margin: 10px 0;
         }
         
-        .stats-card p {
-            color: #6c757d;
-            margin: 0;
-            font-size: 0.9rem;
+        .modal-content {
+            border-radius: 15px;
+            border: none;
+        }
+        
+        .modal-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px 15px 0 0;
         }
     </style>
 </head>
@@ -413,7 +579,7 @@ if (isset($_GET['editar'])) {
             <div class="d-flex justify-content-between align-items-center flex-wrap">
                 <div>
                     <h2><i class="bi bi-grid-fill me-2"></i>Panel de Administración</h2>
-                    <p class="user-info mb-0 mt-1">
+                    <p class="mb-0 mt-1" style="font-size: 0.95rem; opacity: 0.95;">
                         <i class="bi bi-person-circle me-1"></i>
                         <?php echo htmlspecialchars($_SESSION['usuario_nombre']); ?>
                     </p>
@@ -431,43 +597,75 @@ if (isset($_GET['editar'])) {
     </div>
 
     <div class="container">
-        <!-- Estadísticas -->
+        <!-- Mensajes -->
+        <?php if ($mensaje): ?>
+        <div class="alert alert-<?php echo $tipo_mensaje; ?> alert-dismissible fade show" role="alert">
+            <i class="bi bi-<?php echo $tipo_mensaje === 'success' ? 'check-circle-fill' : ($tipo_mensaje === 'warning' ? 'exclamation-triangle-fill' : 'exclamation-circle-fill'); ?> me-2"></i>
+            <?php echo htmlspecialchars($mensaje); ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        <?php endif; ?>
+
+        <!-- Estadísticas Generales -->
         <div class="row mb-4">
-            <div class="col-md-4 mb-3">
+            <div class="col-md-3 mb-3">
                 <div class="stats-card">
                     <i class="bi bi-box-seam text-primary" style="font-size: 2rem;"></i>
                     <h3><?php echo count($productos); ?></h3>
                     <p>Total Productos</p>
                 </div>
             </div>
-            <div class="col-md-4 mb-3">
+            <div class="col-md-3 mb-3">
                 <div class="stats-card">
-                    <i class="bi bi-check-circle text-success" style="font-size: 2rem;"></i>
-                    <h3><?php echo count(array_filter($productos, fn($p) => $p['stock'] > 0)); ?></h3>
-                    <p>Con Stock</p>
+                    <i class="bi bi-people text-info" style="font-size: 2rem;"></i>
+                    <h3><?php echo count($usuarios); ?></h3>
+                    <p>Total Usuarios</p>
                 </div>
             </div>
-            <div class="col-md-4 mb-3">
+            <div class="col-md-3 mb-3">
                 <div class="stats-card">
-                    <i class="bi bi-x-circle text-danger" style="font-size: 2rem;"></i>
-                    <h3><?php echo count(array_filter($productos, fn($p) => $p['stock'] == 0)); ?></h3>
-                    <p>Sin Stock</p>
+                    <i class="bi bi-cart-check text-success" style="font-size: 2rem;"></i>
+                    <h3><?php echo count($pedidos); ?></h3>
+                    <p>Total Pedidos</p>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="stats-card">
+                    <i class="bi bi-clock-history text-warning" style="font-size: 2rem;"></i>
+                    <h3><?php echo count(array_filter($pedidos, fn($p) => $p['estado'] === 'pendiente')); ?></h3>
+                    <p>Pedidos Pendientes</p>
                 </div>
             </div>
         </div>
 
-        <!-- Mensajes -->
-        <?php if ($mensaje): ?>
-        <div class="alert alert-<?php echo $tipo_mensaje; ?> alert-dismissible fade show" role="alert">
-            <i class="bi bi-<?php echo $tipo_mensaje === 'success' ? 'check-circle-fill' : 'exclamation-triangle-fill'; ?> me-2"></i>
-            <?php echo htmlspecialchars($mensaje); ?>
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-        <?php endif; ?>
+        <!-- Pestañas de Navegación -->
+        <ul class="nav nav-tabs" role="tablist">
+            <li class="nav-item">
+                <a class="nav-link <?php echo $tab_activa === 'productos' ? 'active' : ''; ?>" 
+                   href="?tab=productos">
+                    <i class="bi bi-box-seam me-2"></i>Productos
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?php echo $tab_activa === 'usuarios' ? 'active' : ''; ?>" 
+                   href="?tab=usuarios">
+                    <i class="bi bi-people me-2"></i>Usuarios
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?php echo $tab_activa === 'pedidos' ? 'active' : ''; ?>" 
+                   href="?tab=pedidos">
+                    <i class="bi bi-cart-check me-2"></i>Pedidos
+                </a>
+            </li>
+        </ul>
 
-        <!-- Formulario Crear/Editar -->
+        <!-- CONTENIDO PRODUCTOS -->
+        <?php if ($tab_activa === 'productos'): ?>
+        
+        <!-- Formulario Crear/Editar Producto -->
         <div class="card">
-            <div class="card-header text-white">
+            <div class="card-header">
                 <h4>
                     <i class="bi bi-<?php echo $producto_editar ? 'pencil-square' : 'plus-circle-fill'; ?> me-2"></i>
                     <?php echo $producto_editar ? 'Editar Producto' : 'Crear Nuevo Producto'; ?>
@@ -475,7 +673,7 @@ if (isset($_GET['editar'])) {
             </div>
             <div class="card-body">
                 <form method="POST" enctype="multipart/form-data">
-                    <input type="hidden" name="accion" value="<?php echo $producto_editar ? 'actualizar' : 'crear'; ?>">
+                    <input type="hidden" name="accion" value="<?php echo $producto_editar ? 'actualizar_producto' : 'crear_producto'; ?>">
                     <?php if ($producto_editar): ?>
                     <input type="hidden" name="id" value="<?php echo $producto_editar['id']; ?>">
                     <?php endif; ?>
@@ -536,7 +734,7 @@ if (isset($_GET['editar'])) {
                             <?php echo $producto_editar ? 'Actualizar Producto' : 'Guardar Producto'; ?>
                         </button>
                         <?php if ($producto_editar): ?>
-                        <a href="admin_dashboard.php" class="btn btn-secondary">
+                        <a href="?tab=productos" class="btn btn-secondary">
                             <i class="bi bi-x-circle me-1"></i> Cancelar
                         </a>
                         <?php endif; ?>
@@ -547,7 +745,7 @@ if (isset($_GET['editar'])) {
 
         <!-- Lista de Productos -->
         <div class="card">
-            <div class="card-header text-white">
+            <div class="card-header">
                 <h4><i class="bi bi-list-check me-2"></i>Inventario de Productos</h4>
             </div>
             <div class="card-body p-0">
@@ -586,35 +784,268 @@ if (isset($_GET['editar'])) {
                                     </span>
                                 </td>
                                 <td>
-                                    <a href="?editar=<?php echo $producto['id']; ?>" 
-                                    class="btn btn-sm btn-warning btn-action" 
-                                    title="Editar">
+                                    <a href="?tab=productos&editar_producto=<?php echo $producto['id']; ?>" 
+                                       class="btn btn-sm btn-warning btn-action" title="Editar">
                                         <i class="bi bi-pencil-fill"></i>
                                     </a>
-                                    <a href="?eliminar=<?php echo $producto['id']; ?>" 
-                                    class="btn btn-sm btn-danger btn-action" 
-                                    title="Eliminar"
-                                    onclick="return confirm('¿Está seguro de eliminar este producto?\n\nProducto: <?php echo htmlspecialchars($producto['nombre']); ?>');">
+                                    <a href="?tab=productos&eliminar_producto=<?php echo $producto['id']; ?>" 
+                                       class="btn btn-sm btn-danger btn-action" title="Eliminar"
+                                       onclick="return confirm('¿Está seguro de eliminar este producto?\n\nProducto: <?php echo htmlspecialchars($producto['nombre']); ?>');">
                                         <i class="bi bi-trash-fill"></i>
                                     </a>
                                 </td>
-
                             </tr>
                             <?php endforeach; ?>
                         </tbody>
                     </table>
                 </div>
                 <?php else: ?>
-                <div class="empty-state">
-                    <i class="bi bi-inbox"></i>
-                    <p>No hay productos registrados</p>
-                    <small class="text-muted">Comienza agregando tu primer producto usando el formulario de arriba</small>
+                <div class="text-center py-5">
+                    <i class="bi bi-inbox" style="font-size: 4rem; color: #dee2e6;"></i>
+                    <p class="text-muted mt-3">No hay productos registrados</p>
                 </div>
                 <?php endif; ?>
             </div>
         </div>
+
+        <?php endif; ?>
+
+        <!-- CONTENIDO USUARIOS -->
+        <?php if ($tab_activa === 'usuarios'): ?>
+        
+        <!-- Formulario Crear/Editar Usuario -->
+        <div class="card">
+            <div class="card-header">
+                <h4>
+                    <i class="bi bi-<?php echo $usuario_editar ? 'pencil-square' : 'person-plus-fill'; ?> me-2"></i>
+                    <?php echo $usuario_editar ? 'Editar Usuario' : 'Crear Nuevo Usuario'; ?>
+                </h4>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <input type="hidden" name="accion" value="<?php echo $usuario_editar ? 'actualizar_usuario' : 'crear_usuario'; ?>">
+                    <?php if ($usuario_editar): ?>
+                    <input type="hidden" name="id" value="<?php echo $usuario_editar['id']; ?>">
+                    <?php endif; ?>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label"><i class="bi bi-envelope-fill me-1"></i>Correo Electrónico *</label>
+                            <input type="email" class="form-control" name="correo" 
+                                   value="<?php echo $usuario_editar ? htmlspecialchars($usuario_editar['correo']) : ''; ?>" 
+                                   placeholder="usuario@ejemplo.com" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label"><i class="bi bi-shield-fill me-1"></i>Perfil *</label>
+                            <select class="form-select" name="perfil" required>
+                                <option value="usuario" <?php echo ($usuario_editar && $usuario_editar['perfil'] === 'usuario') ? 'selected' : ''; ?>>Usuario</option>
+                                <option value="admin" <?php echo ($usuario_editar && $usuario_editar['perfil'] === 'admin') ? 'selected' : ''; ?>>Administrador</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label"><i class="bi bi-person-fill me-1"></i>Nombre *</label>
+                            <input type="text" class="form-control" name="nombre" 
+                                   value="<?php echo $usuario_editar ? htmlspecialchars($usuario_editar['nombre']) : ''; ?>" 
+                                   placeholder="Nombre" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label"><i class="bi bi-person-fill me-1"></i>Apellido *</label>
+                            <input type="text" class="form-control" name="apellido" 
+                                   value="<?php echo $usuario_editar ? htmlspecialchars($usuario_editar['apellido']) : ''; ?>" 
+                                   placeholder="Apellido" required>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label"><i class="bi bi-telephone-fill me-1"></i>Teléfono *</label>
+                            <input type="tel" class="form-control" name="telefono" 
+                                   value="<?php echo $usuario_editar ? htmlspecialchars($usuario_editar['telefono']) : ''; ?>" 
+                                   placeholder="3001234567" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label"><i class="bi bi-house-fill me-1"></i>Dirección *</label>
+                            <input type="text" class="form-control" name="direccion" 
+                                   value="<?php echo $usuario_editar ? htmlspecialchars($usuario_editar['direccion']) : ''; ?>" 
+                                   placeholder="Calle 123 #45-67" required>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-12 mb-3">
+                            <label class="form-label"><i class="bi bi-lock-fill me-1"></i>Contraseña <?php echo $usuario_editar ? '(dejar en blanco para mantener la actual)' : '*'; ?></label>
+                            <input type="password" class="form-control" name="clave" 
+                                   placeholder="Contraseña segura" <?php echo !$usuario_editar ? 'required' : ''; ?>>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2 mt-4">
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-save me-1"></i>
+                            <?php echo $usuario_editar ? 'Actualizar Usuario' : 'Crear Usuario'; ?>
+                        </button>
+                        <?php if ($usuario_editar): ?>
+                        <a href="?tab=usuarios" class="btn btn-secondary">
+                            <i class="bi bi-x-circle me-1"></i> Cancelar
+                        </a>
+                        <?php endif; ?>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Lista de Usuarios -->
+        <div class="card">
+            <div class="card-header">
+                <h4><i class="bi bi-people-fill me-2"></i>Lista de Usuarios</h4>
+            </div>
+            <div class="card-body p-0">
+                <?php if (!empty($usuarios)): ?>
+                <div class="table-responsive">
+                    <table class="table mb-0">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Nombre Completo</th>
+                                <th>Correo</th>
+                                <th>Teléfono</th>
+                                <th>Dirección</th>
+                                <th>Perfil</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($usuarios as $usuario): ?>
+                            <tr>
+                                <td><strong>#<?php echo $usuario['id']; ?></strong></td>
+                                <td><?php echo htmlspecialchars($usuario['nombre'] . ' ' . $usuario['apellido']); ?></td>
+                                <td><?php echo htmlspecialchars($usuario['correo']); ?></td>
+                                <td><?php echo htmlspecialchars($usuario['telefono']); ?></td>
+                                <td><?php echo htmlspecialchars($usuario['direccion']); ?></td>
+                                <td>
+                                    <span class="badge <?php echo $usuario['perfil'] === 'admin' ? 'bg-danger' : 'bg-primary'; ?>">
+                                        <i class="bi bi-<?php echo $usuario['perfil'] === 'admin' ? 'shield-fill' : 'person-fill'; ?> me-1"></i>
+                                        <?php echo ucfirst($usuario['perfil']); ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <a href="?tab=usuarios&editar_usuario=<?php echo $usuario['id']; ?>" 
+                                       class="btn btn-sm btn-warning btn-action" title="Editar">
+                                        <i class="bi bi-pencil-fill"></i>
+                                    </a>
+                                    <?php if ($usuario['id'] !== $_SESSION['usuario_id']): ?>
+                                    <a href="?tab=usuarios&eliminar_usuario=<?php echo $usuario['id']; ?>" 
+                                       class="btn btn-sm btn-danger btn-action" title="Eliminar"
+                                       onclick="return confirm('¿Está seguro de eliminar este usuario?\n\nUsuario: <?php echo htmlspecialchars($usuario['nombre'] . ' ' . $usuario['apellido']); ?>');">
+                                        <i class="bi bi-trash-fill"></i>
+                                    </a>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <?php else: ?>
+                <div class="text-center py-5">
+                    <i class="bi bi-people" style="font-size: 4rem; color: #dee2e6;"></i>
+                    <p class="text-muted mt-3">No hay usuarios registrados</p>
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <?php endif; ?>
+
+   <!-- CONTENIDO PEDIDOS -->
+<?php if ($tab_activa === 'pedidos'): ?>
+
+<!-- Lista de Pedidos -->
+<div class="card">
+    <div class="card-header">
+        <h4><i class="bi bi-cart-check-fill me-2"></i>Gestión de Pedidos</h4>
+    </div>
+    <div class="card-body p-0">
+        <?php if (!empty($pedidos)): ?>
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th width="80">ID</th>
+                        <th>Cliente</th>
+                        <th width="120">Fecha</th>
+                        <th width="120">Total</th>
+                        <th width="100">Prendas</th>
+                        <th width="130">Estado</th>
+                        <th width="120" class="text-center">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($pedidos as $pedido): ?>
+                    <?php 
+                    $color_estado = [
+                        'pendiente' => 'warning',
+                        'confirmado' => 'info',
+                        'enviado' => 'primary',
+                        'entregado' => 'success',
+                        'cancelado' => 'danger'
+                    ];
+                    $estado_actual = $pedido['estado'] ?? 'pendiente';
+                    ?>
+                    <tr>
+                        <td><strong>#<?php echo $pedido['id']; ?></strong></td>
+                        <td>
+                            <div class="d-flex flex-column">
+                                <strong class="text-truncate" style="max-width: 200px;"><?php echo htmlspecialchars($pedido['nombre']); ?></strong>
+                                <small class="text-muted text-truncate" style="max-width: 200px;"><?php echo htmlspecialchars($pedido['correo']); ?></small>
+                            </div>
+                        </td>
+                        <td><?php echo date('d/m/Y', strtotime($pedido['fecha_pedido'])); ?></td>
+                        <td><strong>$<?php echo number_format($pedido['total'], 0, ',', '.'); ?></strong></td>
+                        <td class="text-center"><span class="badge bg-secondary"><?php echo $pedido['num_prendas']; ?></span></td>
+                        <td>
+                            <span class="badge bg-<?php echo $color_estado[$estado_actual]; ?>">
+                                <?php echo ucfirst($estado_actual); ?>
+                            </span>
+                        </td>
+                        <td class="text-center">
+                            <div class="btn-group btn-group-sm" role="group">
+                                <!-- Cambiamos el botón para redirigir a página de edición -->
+                                <a href="editar_pedido.php?id=<?php echo $pedido['id']; ?>" 
+                                   class="btn btn-outline-info btn-action" 
+                                   title="Editar Pedido">
+                                    <i class="bi bi-pencil-fill"></i>
+                                </a>
+                                <a href="?tab=pedidos&eliminar_pedido=<?php echo $pedido['id']; ?>" 
+                                class="btn btn-outline-danger btn-action" 
+                                title="Eliminar"
+                                onclick="return confirm('¿Está seguro de eliminar este pedido?\n\nPedido #<?php echo $pedido['id']; ?>');">
+                                    <i class="bi bi-trash-fill"></i>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php else: ?>
+        <div class="text-center py-5">
+            <i class="bi bi-cart-x" style="font-size: 4rem; color: #dee2e6;"></i>
+            <p class="text-muted mt-3">No hay pedidos registrados</p>
+        </div>
+        <?php endif; ?>
+    </div>
+</div>
+
+<?php endif; ?>
+
     </div>
 
     <script src="assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+   
 </body>
 </html>
